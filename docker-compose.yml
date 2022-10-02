@@ -1,0 +1,406 @@
+version: "3.8"
+services:
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    devices:
+      - /dev/dri:/dev/dri
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - VERSION=docker
+      - DOCKER_MODS=linuxserver/mods:plex-absolute-hama
+      - PLEX_CLAIM=${PLEX_CLAIM}
+    volumes:
+      - ${CONFIG_FOLDER}/plex:/config
+      - plextranscode:/transcode
+      - ${DATA_FOLDER}:/data
+    networks:
+      - cloud
+    ports:
+      - 32400:32400/tcp
+      - 1900:1900/udp
+      - 3005:3005/tcp
+      - 5353:5353/udp
+      - 8324:8324/tcp
+      - 32410:32410/udp
+      - 32412:32412/udp
+      - 32413:32413/udp
+      - 32414:32414/udp
+      - 32469:32469/tcp
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.plex-rtr.entrypoints=websecure"
+      - "traefik.http.routers.plex-rtr.rule=Host(`plex.${DOMAIN}`)"
+      - "traefik.http.routers.plex-rtr.tls=true"
+      - "traefik.http.routers.plex-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.plex-rtr.service=plex-svc"
+      - "traefik.http.services.plex-svc.loadbalancer.server.port=32400"
+      - "traefik.http.middlewares.basic-auth.basicauth.users=${BASIC_AUTH}"
+  tautulli:
+    image: ghcr.io/tautulli/tautulli:latest
+    container_name: tautulli
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/tautulli:/config
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tautulli-rtr.entrypoints=websecure"
+      - "traefik.http.routers.tautulli-rtr.rule=Host(`tau.${DOMAIN}`)"
+      - "traefik.http.routers.tautulli-rtr.tls=true"
+      - "traefik.http.routers.tautulli-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.tautulli-rtr.service=tautulli-svc"
+      - "traefik.http.routers.tautulli-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.tautulli-svc.loadbalancer.server.port=8181"
+  overseerr:
+    image: sctx/overseerr:latest
+    container_name: overseerr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/overseerr:/app/config
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.overseerr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.overseerr-rtr.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.overseerr-rtr.tls=true"
+      - "traefik.http.routers.overseerr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.overseerr-rtr.service=overseerr-svc"
+      - "traefik.http.services.overseerr-svc.loadbalancer.server.port=5055"
+  traefik:
+    image: traefik:v2.8
+    container_name: traefik
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      # - "--certificatesresolvers.letsencrypt.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.letsencrypt.acme.email=savaover@gmail.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    volumes:
+      - ${CONFIG_FOLDER}/letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cloud
+    ports:
+      - 80:80
+      - 443:443
+      - 8080:8080
+  portainer:
+    image: portainer/portainer:latest
+    container_name: portainer
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CONFIG_FOLDER}/portainer:/data
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer-rtr.entrypoints=websecure"
+      - "traefik.http.routers.portainer-rtr.rule=Host(`portainer.${DOMAIN}`)"
+      - "traefik.http.routers.portainer-rtr.tls=true"
+      - "traefik.http.routers.portainer-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.portainer-rtr.service=portainer-svc"
+      - "traefik.http.services.portainer-svc.loadbalancer.server.port=9000"
+  postgres:
+    container_name: postgresql
+    image: postgres:14
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - ${POSTGRES_FOLDER}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cloud
+    ports:
+      - 5432:5432
+  pgadmin:
+    container_name: pgadmin
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin-rtr.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin-rtr.rule=Host(`pgadmin.${DOMAIN}`)"
+      - "traefik.http.routers.pgadmin-rtr.tls=true"
+      - "traefik.http.routers.pgadmin-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pgadmin-rtr.service=pgadmin-svc"
+      - "traefik.http.routers.pgadmin-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.pgadmin-svc.loadbalancer.server.port=80"
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=${TZ}
+    networks:
+      - cloud
+    expose:
+      - 8191
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/prowlarr:/config
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prowlarr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr-rtr.rule=Host(`prowlarr.${DOMAIN}`)"
+      - "traefik.http.routers.prowlarr-rtr.tls=true"
+      - "traefik.http.routers.prowlarr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.prowlarr-rtr.service=prowlarr-svc"
+      - "traefik.http.routers.prowlarr-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.prowlarr-svc.loadbalancer.server.port=9696"
+  protonvpn:
+    container_name: protonvpn
+    environment:
+      PROTONVPN_USERNAME: ${PROTONVPN_USERNAME}
+      PROTONVPN_PASSWORD: ${PROTONVPN_PASSWORD}
+      PROTONVPN_SERVER: ${PROTONVPN_SERVER}
+      PROTONVPN_TIER: ${PROTONVPN_TIER}
+      PROTONVPN_PROTOCOL: ${PROTONVPN_PROTOCOL}
+    image: ghcr.io/tprasadtp/protonvpn:${PROTONVPN_VERSION}
+    restart: unless-stopped
+    networks:
+      - proxy
+      - cloud
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # rtorrent
+      - 6881:6881/udp
+      - 50000:50000/tcp
+      # transmission
+      - 51413:51413
+      - 51413:51413/udp
+      - 9091
+    expose:
+      # rtorrent
+      - 8000
+      - 8081
+      # transmission
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - USER=${TRANSMISSION_USER}
+      - PASS=${TRANSMISSION_PASSWORD}
+    volumes:
+      - ${CONFIG_FOLDER}/transmission:/config
+      - ${DATA_FOLDER}/torrent:/data/torrent
+    userns_mode: host
+    network_mode: service:protonvpn
+    depends_on:
+      - protonvpn
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.transmission-rtr.entrypoints=websecure"
+      - "traefik.http.routers.transmission-rtr.rule=Host(`transmission.${DOMAIN}`)"
+      - "traefik.http.routers.transmission-rtr.tls=true"
+      - "traefik.http.routers.transmission-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.transmission-rtr.service=transmission-svc"
+      - "traefik.http.routers.transmission-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.transmission-svc.loadbalancer.server.port=9091"
+  rtorrent-rutorrent:
+    image: crazymax/rtorrent-rutorrent:latest
+    container_name: rtorrent
+    restart: always
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ={TZ}
+      - RT_DHT_PORT=6881
+      - RT_INC_PORT=50000
+      - XMLRPC_PORT=8000
+      - RUTORRENT_PORT=8081
+    volumes:
+      - ${CONFIG_FOLDER}/rutorrent:/data"
+      - ${DATA_FOLDER}/torrent:/downloads
+    userns_mode: host
+    network_mode: service:protonvpn
+    depends_on:
+      - protonvpn
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rutorrent-rtr.entrypoints=websecure"
+      - "traefik.http.routers.rutorrent-rtr.rule=Host(`rutorrent.${DOMAIN}`)"
+      - "traefik.http.routers.rutorrent-rtr.tls=true"
+      - "traefik.http.routers.rutorrent-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.rutorrent-rtr.service=rutorrent-svc"
+      - "traefik.http.routers.rutorrent-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.rutorrent-svc.loadbalancer.server.port=8081"
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/radarr:/config
+      - ${DATA_FOLDER}:/data
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.radarr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.radarr-rtr.rule=Host(`radarr.${DOMAIN}`)"
+      - "traefik.http.routers.radarr-rtr.tls=true"
+      - "traefik.http.routers.radarr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.radarr-rtr.service=radarr-svc"
+      - "traefik.http.routers.radarr-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.radarr-svc.loadbalancer.server.port=7878"
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ={TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/sonarr:/config
+      - ${DATA_FOLDER}:/data
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr-rtr.rule=Host(`sonarr.${DOMAIN}`)"
+      - "traefik.http.routers.sonarr-rtr.tls=true"
+      - "traefik.http.routers.sonarr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sonarr-rtr.service=sonarr-svc"
+      - "traefik.http.routers.sonarr-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.sonarr-svc.loadbalancer.server.port=8989"
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/bazarr:/config
+      - ${DATA_FOLDER}:/data
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr-rtr.rule=Host(`bazarr.${DOMAIN}`)"
+      - "traefik.http.routers.bazarr-rtr.tls=true"
+      - "traefik.http.routers.bazarr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.bazarr-rtr.service=bazarr-svc"
+      - "traefik.http.routers.bazarr-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.bazarr-svc.loadbalancer.server.port=6767"
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_FOLDER}/lidarr:/config
+      - ${DATA_FOLDER}:/data
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lidarr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.lidarr-rtr.rule=Host(`lidarr.${DOMAIN}`)"
+      - "traefik.http.routers.lidarr-rtr.tls=true"
+      - "traefik.http.routers.lidarr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.lidarr-rtr.service=lidarr-svc"
+      - "traefik.http.routers.lidarr-rtr.middlewares=basic-auth@docker"
+      - "traefik.http.services.lidarr-svc.loadbalancer.server.port=8686"
+  organizr:
+    image: organizr/organizr:latest
+    container_name: organizr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - fpm=true
+    volumes:
+      - ${CONFIG_FOLDER}/organizr:/config
+    networks:
+      - cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.organizr-rtr.entrypoints=websecure"
+      - "traefik.http.routers.organizr-rtr.rule=Host(`web.${DOMAIN}`)"
+      - "traefik.http.routers.organizr-rtr.tls=true"
+      - "traefik.http.routers.organizr-rtr.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.organizr-rtr.service=organizr-svc"
+      - "traefik.http.services.organizr-svc.loadbalancer.server.port=80"
+
+volumes:
+  pgadmin_data:
+  plextranscode:
+
+networks:
+  cloud:
+   driver: bridge
+  proxy:
+    internal: true
